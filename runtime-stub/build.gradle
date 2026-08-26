@@ -1,0 +1,105 @@
+plugins {
+    id "com.android.library"
+}
+
+android {
+    namespace "com.alpprotect"
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 21
+        targetSdk 34
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+def androidJar() {
+    def sdk = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
+    if (sdk == null) {
+        def lp = rootProject.file("local.properties")
+        if (lp.exists()) {
+            def props = new Properties()
+            lp.withInputStream { props.load(it) }
+            sdk = props.getProperty("sdk.dir")
+        }
+    }
+    if (sdk == null) {
+        throw new GradleException("ANDROID_HOME / sdk.dir not set")
+    }
+    def jar = file("${sdk}/platforms/android-34/android.jar")
+    if (!jar.exists()) {
+        jar = fileTree("${sdk}/platforms").matching { include "android-*/android.jar" }.files.max { it.parentFile.name }
+    }
+    return jar
+}
+
+def d8Bin() {
+    def sdk = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
+    if (sdk == null) {
+        def lp = rootProject.file("local.properties")
+        if (lp.exists()) {
+            def props = new Properties()
+            lp.withInputStream { props.load(it) }
+            sdk = props.getProperty("sdk.dir")
+        }
+    }
+    def tools = file("${sdk}/build-tools")
+    def dir = tools.listFiles()?.findAll { new File(it, "d8").exists() }?.sort { it.name }?.reverse()?.find { true }
+    if (dir == null) {
+        throw new GradleException("d8 not found under ${tools}")
+    }
+    return new File(dir, "d8")
+}
+
+tasks.register("exportRuntimeDex") {
+    dependsOn "compileReleaseJavaWithJavac", "syncReleaseLibJars"
+    doLast {
+        def jars = fileTree(layout.buildDirectory.asFile.get()).matching {
+            include "**/classes.jar"
+        }.files.findAll { it.isFile() && it.length() > 0 && it.path.contains("release") }
+        if (jars.isEmpty()) {
+            throw new GradleException("runtime-stub classes.jar not found")
+        }
+        def jar = jars.max { it.length() }
+        def outDir = file("${layout.buildDirectory.asFile.get()}/exported-dex")
+        outDir.deleteDir()
+        outDir.mkdirs()
+        exec {
+            commandLine d8Bin().absolutePath,
+                    "--release",
+                    "--min-api", "21",
+                    "--lib", androidJar().absolutePath,
+                    "--output", outDir.absolutePath,
+                    jar.absolutePath
+        }
+        def dex = file("${outDir}/classes.dex")
+        if (!dex.exists()) {
+            throw new GradleException("d8 did not write classes.dex")
+        }
+        def destDir = file("${rootDir}/app/src/main/assets")
+        destDir.mkdirs()
+        copy {
+            from dex
+            into destDir
+            rename { "alpprotect-runtime.dex" }
+        }
+        println "Exported runtime stub dex from ${jar} -> ${destDir}/alpprotect-runtime.dex (${dex.length()} bytes)"
+    }
+}
+
+afterEvaluate {
+    def assemble = tasks.findByName("assembleRelease")
+    if (assemble != null) {
+        assemble.dependsOn("exportRuntimeDex")
+    }
+}

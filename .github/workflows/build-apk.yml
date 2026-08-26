@@ -1,0 +1,55 @@
+name: Build AndLua Decryptor APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant Gradle execute permission
+        run: chmod +x gradlew
+
+      - name: Build release APK
+        run: ./gradlew :runtime-stub:assembleRelease :app:assembleRelease --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AndLua-Decryptor-release
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          NAME="AndLua-Decryptor-1.0.0.apk"
+          cp "$APK" "/tmp/${NAME}"
+          gh release delete "v1.0.0" -y 2>/dev/null || true
+          gh release create "v1.0.0" \
+            --title "AndLua Decryptor v1.0.0" \
+            --notes "Same flow as Protector. Unwraps the seal, or keeps runtime decrypt if the seal stays locked." \
+            "/tmp/${NAME}#${NAME}"

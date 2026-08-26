@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AndLua Decryptor</string>
+    <string name="pick">Select APK</string>
+    <string name="installed">Installed apps</string>
+    <string name="idle">Select an APK or pick an installed app.</string>
+    <string name="help">1. Select APK from files\n2. Or choose from Installed apps\nDecrypt starts automatically.\nThen save the file to sdcard.</string>
+    <string name="telegram">Telegram</string>
+    <string name="youtube">YouTube</string>
+    <string name="working">Decrypting…</string>
+    <string name="loading">Loading…</string>
+    <string name="finishing">Finishing…</string>
+    <string name="done">Done.</string>
+    <string name="failed">Decrypt failed.</string>
+    <string name="save_title">Save this file?</string>
+    <string name="save_message">Save to sdcard/ ?</string>
+    <string name="save_yes">Save</string>
+    <string name="save_no">No</string>
+    <string name="need_storage">Allow storage access to save.</string>
+    <string name="saved">Saved to %1$s</string>
+    <string name="save_fail">Could not save.</string>
+    <string name="apps_title">Installed apps</string>
+    <string name="no_apps">No apps found.</string>
+    <string-array name="decrypt_steps">
+        <item>Loading…</item>
+        <item>Decrypting…</item>
+        <item>Finishing…</item>
+    </string-array>
+</resources>
