@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -61,12 +62,45 @@ final class Signer {
         return cert.getEncoded();
     }
 
-    static byte[] apkCertDer(File apkFile) throws Exception {
-        ApkVerifier.Result result = new ApkVerifier.Builder(apkFile).build().verify();
-        List<java.security.cert.X509Certificate> certs = result.getSignerCertificates();
-        if (certs == null || certs.isEmpty()) {
-            throw new IllegalStateException("This package cannot be decrypted");
+    static List<byte[]> collectCerts(Context ctx, File apkFile, List<byte[]> extra) {
+        List<byte[]> out = new ArrayList<>();
+        addUnique(out, extra);
+        try {
+            addUnique(out, Collections.singletonList(certDer(ctx)));
+        } catch (Exception ignored) {
         }
-        return certs.get(0).getEncoded();
+        try {
+            ApkVerifier.Result result = new ApkVerifier.Builder(apkFile).build().verify();
+            List<X509Certificate> certs = result.getSignerCertificates();
+            if (certs != null) {
+                for (int i = 0; i < certs.size(); i++) {
+                    addUnique(out, Collections.singletonList(certs.get(i).getEncoded()));
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return out;
+    }
+
+    private static void addUnique(List<byte[]> out, List<byte[]> extra) {
+        if (extra == null) {
+            return;
+        }
+        for (int i = 0; i < extra.size(); i++) {
+            byte[] cert = extra.get(i);
+            if (cert == null || cert.length == 0) {
+                continue;
+            }
+            boolean dup = false;
+            for (int j = 0; j < out.size(); j++) {
+                if (java.util.Arrays.equals(out.get(j), cert)) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                out.add(cert);
+            }
+        }
     }
 }

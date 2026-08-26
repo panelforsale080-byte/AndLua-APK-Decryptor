@@ -16,6 +16,7 @@ import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -44,8 +45,8 @@ public class MainActivity extends Activity {
     private Button appsBtn;
     private ProgressBar progress;
 
-    private boolean workDone;
-    private Exception workError;
+    private volatile boolean workDone;
+    private volatile Exception workError;
     private int stepIndex;
     private boolean decrypting;
     private boolean pendingSave;
@@ -125,7 +126,13 @@ public class MainActivity extends Activity {
                 try {
                     lastOutName = name + "_decrypted.apk";
                     File outFile = new File(getCacheDir(), lastOutName);
-                    DecryptEngine.decrypt(MainActivity.this, input, outFile);
+                    DecryptEngine.decrypt(MainActivity.this, input, outFile,
+                            new DecryptEngine.Listener() {
+                                @Override
+                                public void log(String line) {
+                                    appendLog(line);
+                                }
+                            });
                     lastDecrypted = outFile;
                     workDone = true;
                 } catch (Exception e) {
@@ -169,14 +176,17 @@ public class MainActivity extends Activity {
         }
         setBusy(false);
         decrypting = false;
-        logView.setText(getString(R.string.help));
         if (workError != null) {
+            appendLog("FAILED");
+            appendLog(workError.getClass().getSimpleName() + ": " + workError.getMessage());
+            appendLog(DecryptEngine.stack(workError));
             status.setText(getString(R.string.failed));
             toast(getString(R.string.failed));
             return;
         }
         animateProgress(100);
         status.setText(getString(R.string.done));
+        appendLog("Done.");
         askSave();
     }
 
@@ -307,6 +317,32 @@ public class MainActivity extends Activity {
                 toast(getString(R.string.failed));
             }
         }
+    }
+
+    private void appendLog(final String line) {
+        if (line == null) {
+            return;
+        }
+        DecryptEngine.androidLog(line);
+        main.post(new Runnable() {
+            @Override
+            public void run() {
+                if (logView.getText() == null || logView.getText().length() == 0) {
+                    logView.setText(line);
+                } else {
+                    logView.append("\n" + line);
+                }
+                if (logView.getParent() instanceof ScrollView) {
+                    final ScrollView scroller = (ScrollView) logView.getParent();
+                    scroller.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            scroller.fullScroll(View.FOCUS_DOWN);
+                        }
+                    });
+                }
+            }
+        });
     }
 
     private void animateProgress(int to) {

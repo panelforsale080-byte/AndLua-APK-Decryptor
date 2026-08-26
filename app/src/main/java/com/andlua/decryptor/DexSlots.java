@@ -26,33 +26,89 @@ final class DexSlots {
                 || indexOf(dex, "AlpRuntime".getBytes(StandardCharsets.US_ASCII)) >= 0;
     }
 
-    static byte[] recoverMaster(byte[] stubDex, String pkg, byte[] certDer, byte[] sampleWrapped)
-            throws Exception {
-        byte[] mask = SealCrypto.bindMask(pkg, certDer);
-        List<String> hex = hex32(readStrings(stubDex));
-        if (hex.isEmpty()) {
-            hex = hex32Raw(stubDex);
-        }
+    static byte[] recoverMaster(byte[] stubDex, String pkg, List<byte[]> certs, byte[] sampleWrapped,
+                                DecryptEngine.Listener log) {
+        List<String> hex = mergeHex(stubDex);
         hex.remove(SA);
         hex.remove(SB);
-        for (int i = 0; i < hex.size(); i++) {
-            for (int j = 0; j < hex.size(); j++) {
-                if (i == j) {
-                    continue;
+        if (log != null) {
+            log.log("Key slots " + hex.size() + " pkg=" + pkg);
+        }
+        if (hex.isEmpty() || certs == null || certs.isEmpty() || sampleWrapped == null) {
+            return null;
+        }
+        if (hex.size() > 8) {
+            hex = hex.subList(0, 8);
+        }
+        for (int c = 0; c < certs.size(); c++) {
+            byte[] certDer = certs.get(c);
+            if (certDer == null || certDer.length == 0) {
+                continue;
+            }
+            byte[] mask;
+            try {
+                mask = SealCrypto.bindMask(pkg, certDer);
+            } catch (Exception e) {
+                if (log != null) {
+                    log.log("Cert " + (c + 1) + " bind fail " + e.getMessage());
                 }
-                byte[] material = concat(fromHex(hex.get(i)), fromHex(hex.get(j)));
-                if (material.length != 32) {
-                    continue;
-                }
-                byte[] master = SealCrypto.xor(material, mask);
-                try {
-                    SealCrypto.unwrap(master, sampleWrapped);
-                    return master;
-                } catch (Exception ignored) {
+                continue;
+            }
+            if (log != null) {
+                log.log("Trying cert " + (c + 1) + "/" + certs.size() + " (" + certDer.length + " bytes)");
+            }
+            for (int i = 0; i < hex.size(); i++) {
+                for (int j = 0; j < hex.size(); j++) {
+                    if (i == j) {
+                        continue;
+                    }
+                    byte[] material = concat(fromHex(hex.get(i)), fromHex(hex.get(j)));
+                    if (material.length != 32) {
+                        continue;
+                    }
+                    byte[] master = SealCrypto.xor(material, mask);
+                    try {
+                        SealCrypto.unwrap(master, sampleWrapped);
+                        if (log != null) {
+                            log.log("Key match cert " + (c + 1) + " slots " + i + "+" + j);
+                        }
+                        return master;
+                    } catch (Exception ignored) {
+                    }
                 }
             }
         }
-        throw new IllegalStateException("This package cannot be decrypted");
+        if (log != null) {
+            log.log("No key match");
+        }
+        return null;
+    }
+
+    private static List<String> mergeHex(byte[] stubDex) {
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        List<String> out = new ArrayList<>();
+        List<String> fromStrings = hex32(readStrings(stubDex));
+        List<String> fromRaw = hex32Raw(stubDex);
+        addHex(out, seen, fromStrings, true);
+        addHex(out, seen, fromRaw, true);
+        addHex(out, seen, fromStrings, false);
+        addHex(out, seen, fromRaw, false);
+        return out;
+    }
+
+    private static void addHex(List<String> out, Set<String> seen, List<String> src, boolean upperOnly) {
+        for (String s : src) {
+            if (s == null) {
+                continue;
+            }
+            if (upperOnly && !s.equals(s.toUpperCase())) {
+                continue;
+            }
+            String key = s.toUpperCase();
+            if (seen.add(key)) {
+                out.add(s);
+            }
+        }
     }
 
     static String originalLauncher(byte[] stubDex) {
