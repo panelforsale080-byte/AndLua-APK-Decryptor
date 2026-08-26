@@ -36,7 +36,7 @@ final class OriginalLua {
             return null;
         }
         if (startsWith(raw, LUA_MAGIC)) {
-            return new Result(raw, "bytecode", false);
+            return toSource(raw, false);
         }
         if (looksLikeSource(raw)) {
             return new Result(raw, "source", false);
@@ -46,12 +46,23 @@ final class OriginalLua {
             return null;
         }
         if (startsWith(decoded, LUA_MAGIC)) {
-            return new Result(decoded, "bytecode", true);
+            return toSource(decoded, true);
         }
         if (looksLikeSource(decoded)) {
             return new Result(decoded, "source", true);
         }
         return new Result(decoded, "opened", true);
+    }
+
+    private static Result toSource(byte[] bytecode, boolean fromEncoded) {
+        String src = Lua53Source.decompile(bytecode);
+        if (src != null && src.trim().length() > 8) {
+            return new Result(src.getBytes(StandardCharsets.UTF_8), "source", true);
+        }
+        if (fromEncoded) {
+            return new Result(bytecode, "bytecode", true);
+        }
+        return new Result(bytecode, "bytecode", false);
     }
 
     static String peek(byte[] data) {

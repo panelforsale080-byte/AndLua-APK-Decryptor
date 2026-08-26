@@ -113,7 +113,7 @@ final class DecryptEngine {
             }
             if (master != null) {
                 log.log("Runtime key recovered");
-            } else {
+            } else if (scan.wrappedCount > 0 || stub != null) {
                 log.log("Runtime key not recovered");
             }
 
