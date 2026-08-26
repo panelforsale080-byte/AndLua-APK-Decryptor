@@ -97,8 +97,8 @@ final class DecryptEngine {
             }
             log.log("Sealed lua " + scan.wrappedCount + "/" + scan.luaCount);
 
-            if (scan.wrappedCount == 0 && !hasGate && stub == null && keyFile == null) {
-                throw new IllegalStateException("Not a sealed AndLua package (no runtime gate, no sealed lua)");
+            if (scan.luaCount == 0) {
+                throw new IllegalStateException("No lua files in this package");
             }
 
             byte[] master = null;
@@ -138,6 +138,8 @@ final class DecryptEngine {
             }
 
             int opened = 0;
+            int originalOpened = 0;
+            int plainKept = 0;
             int stillWrapped = 0;
             List<String> luaPaths = luaPaths(apk);
             if (luaPaths.isEmpty()) {
@@ -160,26 +162,48 @@ final class DecryptEngine {
                 if (raw == null) {
                     continue;
                 }
-                if (!SealCrypto.isWrapped(raw)) {
-                    continue;
+                log.log(path + " " + OriginalLua.peek(raw));
+                byte[] cur = raw;
+                boolean changed = false;
+                if (SealCrypto.isWrapped(cur)) {
+                    if (master == null) {
+                        stillWrapped++;
+                        log.log("  still sealed");
+                        continue;
+                    }
+                    try {
+                        cur = SealCrypto.unwrap(master, cur);
+                        changed = true;
+                        log.log("  unwrapped " + cur.length + " bytes");
+                    } catch (Exception e) {
+                        stillWrapped++;
+                        log.log("  unwrap fail " + e.getClass().getSimpleName());
+                        continue;
+                    }
                 }
-                if (master == null) {
-                    stillWrapped++;
-                    log.log("Still sealed " + path);
-                    continue;
+                OriginalLua.Result openedLua = OriginalLua.open(cur);
+                if (openedLua != null && openedLua.changed) {
+                    cur = openedLua.data;
+                    changed = true;
+                    originalOpened++;
+                    log.log("  original " + openedLua.kind + " " + cur.length + " bytes");
+                } else if (openedLua != null) {
+                    plainKept++;
+                    log.log("  already " + openedLua.kind);
+                } else {
+                    log.log("  unknown encoding, kept");
                 }
-                try {
-                    byte[] inner = SealCrypto.unwrap(master, raw);
-                    apk.removeInputSource(path);
-                    apk.add(new ByteInputSource(inner, path));
+                if (changed) {
+                    try {
+                        apk.removeInputSource(path);
+                    } catch (Exception ignored) {
+                    }
+                    apk.add(new ByteInputSource(cur, path));
                     opened++;
-                    log.log("Opened " + path + " (" + inner.length + " bytes)");
-                } catch (Exception e) {
-                    stillWrapped++;
-                    log.log("Open fail " + path + " " + e.getClass().getSimpleName());
                 }
             }
-            log.log("Opened " + opened + ", still sealed " + stillWrapped);
+            log.log("Opened " + opened + " original " + originalOpened
+                    + " already open " + plainKept + " still sealed " + stillWrapped);
 
             if (stillWrapped == 0) {
                 if (hasGate) {
@@ -266,6 +290,8 @@ final class DecryptEngine {
                                 scan.sampleWrapped = data;
                                 log.log("Sealed sample " + name);
                             }
+                        } else {
+                            log.log("Lua " + name + " " + OriginalLua.peek(data));
                         }
                     } else if (name.toLowerCase().endsWith(".dex")) {
                         byte[] data = readAll(zip.getInputStream(entry));

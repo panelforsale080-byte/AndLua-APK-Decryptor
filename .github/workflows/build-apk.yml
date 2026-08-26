@@ -46,10 +46,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-          NAME="AndLua-Decryptor-1.0.1.apk"
+          NAME="AndLua-Decryptor-1.0.2.apk"
           cp "$APK" "/tmp/${NAME}"
-          gh release delete "v1.0.1" -y 2>/dev/null || true
-          gh release create "v1.0.1" \
-            --title "AndLua Decryptor v1.0.1" \
-            --notes "Fix decrypt failures. Show real logs. Recover runtime key from package cert and signing cert." \
+          gh release delete "v1.0.2" -y 2>/dev/null || true
+          gh release create "v1.0.2" \
+            --title "AndLua Decryptor v1.0.2" \
+            --notes "Opens original AndLua lua, plain lua, and protector seal. Logs stay on screen." \
             "/tmp/${NAME}#${NAME}"
