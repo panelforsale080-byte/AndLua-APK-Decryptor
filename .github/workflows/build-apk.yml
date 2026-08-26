@@ -27,6 +27,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install NDK and CMake
+        run: |
+          yes | sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
+
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
 
@@ -46,10 +50,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-          NAME="AndLua-Decryptor-1.0.3.apk"
+          NAME="AndLua-Decryptor-1.1.0.apk"
           cp "$APK" "/tmp/${NAME}"
-          gh release delete "v1.0.3" -y 2>/dev/null || true
-          gh release create "v1.0.3" \
-            --title "AndLua Decryptor v1.0.3" \
-            --notes "Second layer: open AndLua string constants and turn bytecode into source." \
+          gh release delete "v1.1.0" -y 2>/dev/null || true
+          gh release create "v1.1.0" \
+            --title "AndLua Decryptor v1.1.0" \
+            --notes "Custom/strong lua is opened with the APK's own runtime (load+dump), then turned into source when possible." \
             "/tmp/${NAME}#${NAME}"

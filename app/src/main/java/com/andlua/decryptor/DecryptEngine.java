@@ -15,6 +15,7 @@ import com.reandroid.arsc.chunk.xml.AndroidManifestBlock;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -96,6 +97,11 @@ final class DecryptEngine {
                 sampleWrapped = firstWrapped(apk);
             }
             log.log("Sealed lua " + scan.wrappedCount + "/" + scan.luaCount);
+
+            File libDir = extractNativeLibs(ctx, inputApk, log);
+            if (libDir != null) {
+                preloadLibs(libDir, log);
+            }
 
             if (scan.luaCount == 0) {
                 throw new IllegalStateException("No lua files in this package");
@@ -191,7 +197,27 @@ final class DecryptEngine {
                     plainKept++;
                     log.log("  already " + openedLua.kind);
                 } else {
-                    log.log("  unknown encoding, kept");
+                    log.log("  unknown encoding");
+                }
+                boolean needRuntime = openedLua == null
+                        || "custom".equals(openedLua.kind)
+                        || "bytecode".equals(openedLua.kind);
+                if (needRuntime && libDir != null && LuaVm.ready()) {
+                    log.log("  runtime decrypt…");
+                    byte[] dumped = LuaVm.undump(libDir.getAbsolutePath(), cur);
+                    if (dumped != null && dumped.length > 4) {
+                        log.log("  runtime opened " + dumped.length + " bytes");
+                        OriginalLua.Result again = OriginalLua.open(dumped);
+                        if (again != null) {
+                            cur = again.data;
+                            log.log("  after runtime " + again.kind);
+                        } else {
+                            cur = dumped;
+                        }
+                        changed = true;
+                    } else {
+                        log.log("  runtime skip " + LuaVm.error());
+                    }
                 }
                 if (changed) {
                     try {
@@ -265,6 +291,101 @@ final class DecryptEngine {
         } finally {
             apk.close();
         }
+    }
+
+    private static File extractNativeLibs(Context ctx, File apkFile, Listener log) {
+        File root = new File(ctx.getCacheDir(), "nativelibs");
+        deleteTree(root);
+        String[] abis = Build.SUPPORTED_ABIS;
+        if (abis == null || abis.length == 0) {
+            return null;
+        }
+        try {
+            ZipFile zip = new ZipFile(apkFile);
+            try {
+                for (int a = 0; a < abis.length; a++) {
+                    String abi = abis[a];
+                    String prefix = "lib/" + abi + "/";
+                    File dest = new File(root, abi);
+                    int n = 0;
+                    Enumeration<? extends ZipEntry> entries = zip.entries();
+                    while (entries.hasMoreElements()) {
+                        ZipEntry entry = entries.nextElement();
+                        if (entry.isDirectory()) {
+                            continue;
+                        }
+                        String name = entry.getName();
+                        if (!name.startsWith(prefix) || !name.endsWith(".so")) {
+                            continue;
+                        }
+                        if (!dest.exists() && !dest.mkdirs()) {
+                            continue;
+                        }
+                        String base = name.substring(name.lastIndexOf('/') + 1);
+                        File outFile = new File(dest, base);
+                        InputStream in = zip.getInputStream(entry);
+                        try {
+                            FileOutputStream out = new FileOutputStream(outFile);
+                            try {
+                                byte[] buf = new byte[8192];
+                                int r;
+                                while ((r = in.read(buf)) != -1) {
+                                    out.write(buf, 0, r);
+                                }
+                            } finally {
+                                out.close();
+                            }
+                        } finally {
+                            in.close();
+                        }
+                        n++;
+                    }
+                    if (n > 0) {
+                        log.log("Runtime libs " + abi + " x" + n);
+                        return dest;
+                    }
+                }
+            } finally {
+                zip.close();
+            }
+        } catch (Exception e) {
+            log.log("Runtime libs fail " + e.getMessage());
+        }
+        log.log("No runtime libs in package");
+        return null;
+    }
+
+    private static void preloadLibs(File dir, Listener log) {
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (int i = 0; i < files.length; i++) {
+            File f = files[i];
+            String name = f.getName();
+            if (!name.endsWith(".so") || name.contains("luajava")) {
+                continue;
+            }
+            try {
+                System.load(f.getAbsolutePath());
+                log.log("Loaded " + name);
+            } catch (Throwable t) {
+                log.log("Load skip " + name);
+            }
+        }
+    }
+
+    private static void deleteTree(File f) {
+        if (f == null || !f.exists()) {
+            return;
+        }
+        File[] kids = f.listFiles();
+        if (kids != null) {
+            for (int i = 0; i < kids.length; i++) {
+                deleteTree(kids[i]);
+            }
+        }
+        f.delete();
     }
 
     private static ZipScan scanZip(File apkFile, Listener log) {

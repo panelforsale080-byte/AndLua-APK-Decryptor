@@ -36,7 +36,11 @@ final class OriginalLua {
             return null;
         }
         if (startsWith(raw, LUA_MAGIC)) {
-            return toSource(raw, false);
+            int ver = raw.length > 4 ? (raw[4] & 0xff) : 0;
+            if (ver == 0x53) {
+                return toSource(raw, false);
+            }
+            return new Result(raw, "custom", false);
         }
         if (looksLikeSource(raw)) {
             return new Result(raw, "source", false);
@@ -46,7 +50,11 @@ final class OriginalLua {
             return null;
         }
         if (startsWith(decoded, LUA_MAGIC)) {
-            return toSource(decoded, true);
+            int ver = decoded.length > 4 ? (decoded[4] & 0xff) : 0;
+            if (ver == 0x53) {
+                return toSource(decoded, true);
+            }
+            return new Result(decoded, "custom", true);
         }
         if (looksLikeSource(decoded)) {
             return new Result(decoded, "source", true);

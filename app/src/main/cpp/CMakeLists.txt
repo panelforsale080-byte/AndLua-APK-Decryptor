@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.18.1)
+project(luavm)
+add_library(luavm SHARED luavm.c)
+find_library(log-lib log)
+target_link_libraries(luavm ${log-lib} dl)
