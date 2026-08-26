@@ -46,7 +46,7 @@ public class MainActivity extends Activity {
     private ProgressBar progress;
 
     private volatile boolean workDone;
-    private volatile Exception workError;
+    private volatile Throwable workError;
     private int stepIndex;
     private boolean decrypting;
     private boolean pendingSave;
@@ -135,7 +135,7 @@ public class MainActivity extends Activity {
                             });
                     lastDecrypted = outFile;
                     workDone = true;
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     workError = e;
                     workDone = true;
                 }

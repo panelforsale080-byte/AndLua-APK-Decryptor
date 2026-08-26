@@ -1,8 +1,8 @@
 #include <android/log.h>
-#include <dirent.h>
 #include <dlfcn.h>
 #include <jni.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -57,45 +57,39 @@ static int writer(void *L, const void *data, size_t sz, void *ud) {
     return 0;
 }
 
-static int is_so(const char *name) {
-    size_t n = strlen(name);
-    return n > 3 && strcmp(name + n - 3, ".so") == 0;
-}
-
 static void *open_lua(const char *dir) {
-    DIR *d = opendir(dir);
-    if (!d) {
-        set_err("no lib dir");
-        return NULL;
-    }
+    static const char *names[] = {
+            "liblua.so",
+            "libandlua.so",
+            "libscript.so",
+            NULL
+    };
     char path[512];
-    struct dirent *ent;
-    void *found = NULL;
-    while ((ent = readdir(d)) != NULL) {
-        if (!is_so(ent->d_name)) {
+    int i;
+    for (i = 0; names[i] != NULL; i++) {
+        snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
+        struct stat st;
+        if (stat(path, &st) != 0) {
             continue;
         }
-        if (strstr(ent->d_name, "luajava") != NULL) {
-            continue;
-        }
-        snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
-        void *h = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
+        dlerror();
+        void *h = dlopen(path, RTLD_NOW);
         if (!h) {
-            LOGI("dlopen fail %s %s", path, dlerror());
+            const char *e = dlerror();
+            LOGI("dlopen fail %s %s", path, e ? e : "");
             continue;
         }
         if (dlsym(h, "luaL_newstate") != NULL) {
             LOGI("lua lib %s", path);
-            found = h;
-            break;
+            return h;
         }
         dlclose(h);
     }
-    closedir(d);
-    if (!found) {
-        set_err("no lua runtime in apk libs");
+    if (dlsym(RTLD_DEFAULT, "luaL_newstate") != NULL) {
+        return RTLD_DEFAULT;
     }
-    return found;
+    set_err("no lua runtime in apk libs");
+    return NULL;
 }
 
 static unsigned char *run_undump(void *h, const unsigned char *in, size_t in_n,

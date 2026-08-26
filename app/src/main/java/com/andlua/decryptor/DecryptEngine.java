@@ -23,12 +23,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 final class DecryptEngine {
     static final String GATE = "com.alpprotect.GateActivity";
     private static final String TAG = "AlpDecrypt";
+    private static volatile boolean runtimeGaveUp;
 
     interface Listener {
         void log(String line);
@@ -45,6 +48,10 @@ final class DecryptEngine {
         try {
             return decryptInner(ctx, inputApk, outputApk, log);
         } catch (Exception e) {
+            log.log("ERROR " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            log.log(stack(e));
+            throw e;
+        } catch (Error e) {
             log.log("ERROR " + e.getClass().getSimpleName() + ": " + e.getMessage());
             log.log(stack(e));
             throw e;
@@ -98,10 +105,8 @@ final class DecryptEngine {
             }
             log.log("Sealed lua " + scan.wrappedCount + "/" + scan.luaCount);
 
+            runtimeGaveUp = false;
             File libDir = extractNativeLibs(ctx, inputApk, log);
-            if (libDir != null) {
-                preloadLibs(libDir, log);
-            }
 
             if (scan.luaCount == 0) {
                 throw new IllegalStateException("No lua files in this package");
@@ -202,9 +207,9 @@ final class DecryptEngine {
                 boolean needRuntime = openedLua == null
                         || "custom".equals(openedLua.kind)
                         || "bytecode".equals(openedLua.kind);
-                if (needRuntime && libDir != null && LuaVm.ready()) {
+                if (needRuntime && libDir != null && !runtimeGaveUp && LuaVm.ready()) {
                     log.log("  runtime decrypt…");
-                    byte[] dumped = LuaVm.undump(libDir.getAbsolutePath(), cur);
+                    byte[] dumped = runtimeUndump(libDir, cur, log);
                     if (dumped != null && dumped.length > 4) {
                         log.log("  runtime opened " + dumped.length + " bytes");
                         OriginalLua.Result again = OriginalLua.open(dumped);
@@ -215,8 +220,9 @@ final class DecryptEngine {
                             cur = dumped;
                         }
                         changed = true;
-                    } else {
-                        log.log("  runtime skip " + LuaVm.error());
+                    } else if (!runtimeGaveUp) {
+                        String err = LuaVm.error();
+                        log.log("  runtime skip" + (err == null || err.length() == 0 ? "" : " " + err));
                     }
                 }
                 if (changed) {
@@ -355,24 +361,33 @@ final class DecryptEngine {
         return null;
     }
 
-    private static void preloadLibs(File dir, Listener log) {
-        File[] files = dir.listFiles();
-        if (files == null) {
-            return;
-        }
-        for (int i = 0; i < files.length; i++) {
-            File f = files[i];
-            String name = f.getName();
-            if (!name.endsWith(".so") || name.contains("luajava")) {
-                continue;
+    private static byte[] runtimeUndump(final File libDir, final byte[] cur, Listener log) {
+        final byte[][] box = new byte[1][];
+        final CountDownLatch done = new CountDownLatch(1);
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    box[0] = LuaVm.undump(libDir.getAbsolutePath(), cur);
+                } catch (Throwable ignored) {
+                } finally {
+                    done.countDown();
+                }
             }
-            try {
-                System.load(f.getAbsolutePath());
-                log.log("Loaded " + name);
-            } catch (Throwable t) {
-                log.log("Load skip " + name);
+        }, "alp-luavm");
+        t.start();
+        try {
+            if (!done.await(20, TimeUnit.SECONDS)) {
+                runtimeGaveUp = true;
+                log.log("  runtime hung — skip remaining");
+                return null;
             }
+        } catch (InterruptedException e) {
+            runtimeGaveUp = true;
+            log.log("  runtime interrupted");
+            return null;
         }
+        return box[0];
     }
 
     private static void deleteTree(File f) {
@@ -440,10 +455,15 @@ final class DecryptEngine {
             } else {
                 flags |= PackageManager.GET_SIGNATURES;
             }
-            PackageInfo pi = pm.getPackageArchiveInfo(apkFile.getAbsolutePath(), flags);
+            String apkPath = apkFile.getAbsolutePath();
+            PackageInfo pi = pm.getPackageArchiveInfo(apkPath, flags);
             if (pi == null) {
                 log.log("PackageManager archive info: none");
                 return info;
+            }
+            if (pi.applicationInfo != null) {
+                pi.applicationInfo.sourceDir = apkPath;
+                pi.applicationInfo.publicSourceDir = apkPath;
             }
             info.packageName = pi.packageName;
             if (pi.activities != null) {
@@ -472,6 +492,14 @@ final class DecryptEngine {
             } else if (pi.signatures != null) {
                 for (int i = 0; i < pi.signatures.length; i++) {
                     info.certs.add(pi.signatures[i].toByteArray());
+                }
+            }
+            if (info.certs.isEmpty() && Build.VERSION.SDK_INT >= 28) {
+                PackageInfo pi2 = pm.getPackageArchiveInfo(apkPath, PackageManager.GET_SIGNATURES);
+                if (pi2 != null && pi2.signatures != null) {
+                    for (int i = 0; i < pi2.signatures.length; i++) {
+                        info.certs.add(pi2.signatures[i].toByteArray());
+                    }
                 }
             }
             log.log("Archive package " + info.packageName

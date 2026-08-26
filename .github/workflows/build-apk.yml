@@ -50,10 +50,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-          NAME="AndLua-Decryptor-1.1.0.apk"
+          NAME="AndLua-Decryptor-1.1.1.apk"
           cp "$APK" "/tmp/${NAME}"
-          gh release delete "v1.1.0" -y 2>/dev/null || true
-          gh release create "v1.1.0" \
-            --title "AndLua Decryptor v1.1.0" \
-            --notes "Custom/strong lua is opened with the APK's own runtime (load+dump), then turned into source when possible." \
+          gh release delete "v1.1.1" -y 2>/dev/null || true
+          gh release create "v1.1.1" \
+            --title "AndLua Decryptor v1.1.1" \
+            --notes "Do not load every .so from the APK (that hung the app). Open standard lua even if custom/strong runtime dump fails or times out." \
             "/tmp/${NAME}#${NAME}"
